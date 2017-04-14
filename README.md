@@ -33,13 +33,14 @@ It is assumed that the resulting code may be run in a cloud computing environmen
 
 1.  Convert Python code for data processing into C extensions using Cython,
 
-2.  Optimize time-consuming calculations with parallel computation (e.g. finding quantiles of long lists of numbers),
+2.  Optimize time-consuming calculations with OpenMP,
 
-3.  Implement concurrent processing of data from multiple days and/or multiple participants,
+3.  Implement concurrent processing of data from multiple days and/or multiple participants using Spark.
 
-4.  Efficiently implement imputation routines by concurrently processing separate regions of missing data.
+Lastly, efficient imputation routines will be implemented with hybrid parallel programming.  It is anticipated that this will allow rapid evaluation of several imputation methods, with the goal of selecting an optimal method for future use.
 
-Regarding item 4, it is anticipated that efficient imputation will allow rapid evaluation of several imputation methods, with the goal of selecting an optimal method for future use.
+
+## Stage 1
 
 
 
