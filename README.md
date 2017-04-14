@@ -42,6 +42,14 @@ Lastly, efficient imputation routines will be implemented with hybrid parallel p
 
 ## Stage 1
 
+After implementing the accelerometer data processing code in Python, several key segments of code were written as C extensions with Cython.  Further optimzation was accomplished with OpenMP functionality from the cython.parallel module.
+
+!["runtime plots"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/runtime_plots.png)
+
+Each version of the code was benchmarked on a small data set containing 62 hours of accelerometer observations.  Computation took place on the Odyssey Cluster's general partition nodes (each equipped with four AMD Optern 6300-series CPU), and also on a quad-core laptop (equipped with an Intel Core i5-2540M).  Estimates were obtained by averaging runtimes for five repetitions of the data processing task.  The above plots show estimated processing speeds, in seconds per hour of accelerometer data.  
+
+On a single node with four processors, the OpenMP version of the code improves the speed of the Python version by over 60%; loss of speed is evident with eight proccessors, possibly due to communication between nodes.  On a laptop, the OpenMP code completes the processing task in nearly a quarter of the time required by the Python version.  For both computing environments, the bulk of improvement is due to the use of C extensions, with smaller speed gains arising from parallelization.
+
 
 
 
