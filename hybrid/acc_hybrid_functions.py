@@ -11,10 +11,14 @@ import numpy as np
 import time
 import os
 import zipfile
+import shutil        
 import powerlaw
+
+from mpi4py import MPI
 
 from statsmodels.tsa.stattools import acf
 
+import acc_hybrid_helpers as helpers
 
 
 #########################################
@@ -48,24 +52,59 @@ def to_localtime(timestamp, time_format = '%H:%M'):
     
     return time.strftime(time_format, time.localtime(timestamp / 1000))
 
+
 ####################################
+# Flatten a list of lists
+####################################
+    
+def flatten(s):    
+
+    temp = []
+    for i in s:
+        temp = temp + i
+    
+    return temp
+        
+    
+####################################
+# - Updated with MPI code
 # Unzip data
 # Input data directory (not zip directory)
 ####################################
 
 def unzip(directory):
-    files = os.listdir(directory + 'raw_zips/')
     
-    if not os.path.exists(directory + 'raw_unzipped/'):
-        os.makedirs(directory + 'raw_unzipped/')
+    comm = MPI.COMM_WORLD
+    rank = MPI.COMM_WORLD.Get_rank()
+    size = MPI.COMM_WORLD.Get_size()
+
+    if rank == 0:
     
-    zips = [f for f in files if f[-4:] == '.zip'] 
-    for z in zips:
-        temp_ref = zipfile.ZipFile(directory + 'raw_zips/' + z)
-        temp_ref.extractall(directory + 'raw_unzipped/')
-        temp_ref.close()
+        files = os.listdir(directory + 'raw_zips/')
+        zips = [f for f in files if f[-4:] == '.zip'] 
+    
+        if not os.path.exists(directory + 'raw_unzipped/'):
+            os.makedirs(directory + 'raw_unzipped/')    
+
+    else:
+        zips = None
+
+    zips = comm.bcast(zips, root = 0)           
+    count = 0    
         
-    print 'Unzipped', len(zips), 'directories.'
+    #for z in zips:
+    for i in range(len(zips)):
+        
+        if i%size == rank:
+   
+            z = zips[i]
+            temp_ref = zipfile.ZipFile(directory + 'raw_zips/' + z)
+            temp_ref.extractall(directory + 'raw_unzipped/')
+            temp_ref.close()
+            count += 1
+    
+    comm.Barrier()
+    print 'Rank', rank, 'unzipped', count, 'directories.'
 
 
 ####################################
@@ -116,7 +155,7 @@ def stack_files(files, source):
 
 def sigmag(raw, phone_type):
 
-    timestamp = raw['timestamp']
+    # timestamp = raw['timestamp']
 
     if phone_type == 'Android':
         x = raw['x']
@@ -138,9 +177,10 @@ def sigmag(raw, phone_type):
 # epochs with no samples.
 #########################################
 
-def get_epochs(sigmag, start, end, locf = True):
+def get_epochs(sigmag, locf = True, run = 'OpenMP'):
         
     times = sigmag['timestamp'] 
+    samples = sigmag['sig_mag']
     t0 = times[0] - ( times[0] % (5*second) )
     t1 = times[len(times)-1]
     
@@ -150,42 +190,62 @@ def get_epochs(sigmag, start, end, locf = True):
     epoch_end = epoch_start + (5*1000) - 1
 
     # calculate mean absolute deviation for each epoch
-    # count samples for each epoch
-    epoch_dev = []
-    epoch_samples = []
-    
-    for i in range(n_epochs):
+    # count samples for each epoch        
+    if run == 'Python':
+        epoch_dev = []
+        epoch_samples = []
         
-        e0 = epoch_start[i]
-        e1 = epoch_end[i]
-        temp = sigmag.loc[ (sigmag['timestamp'] >= e0) & (sigmag['timestamp'] <= e1) ]
-        samples = np.asarray(temp['sig_mag'])
-        
-        if len(samples) > 0:             
-            mean_dev = np.mean(abs(samples - gee))
-        if len(samples) == 0:
-            mean_dev = None
-             
-        epoch_dev.append(mean_dev)
-        epoch_samples.append(len(samples))
-
-    # do LOCF imputation
-    if locf:
-        epoch_locf = []
         for i in range(n_epochs):
-
-            if epoch_samples[i] > 0:
-                epoch_locf.append(epoch_dev[i])
-        
-            if epoch_samples[i] == 0:
-                epoch_locf.append(epoch_locf[i - 1])
+            
+            e0 = epoch_start[i]
+            e1 = epoch_end[i]
+            temp = sigmag.loc[ (sigmag['timestamp'] >= e0) & (sigmag['timestamp'] <= e1) ]
+            samples = np.asarray(temp['sig_mag'])
+            
+            if len(samples) > 0:             
+                mean_dev = np.mean(abs(samples - gee))
+            if len(samples) == 0:
+                mean_dev = None
+                 
+            epoch_dev.append(mean_dev)
+            epoch_samples.append(len(samples))       
                 
+    if run == 'Cython':
+        epoch_dev, epoch_samples = helpers.proc_epochs_cython(np.asarray(times), np.asarray(samples), 
+                                                        epoch_start, epoch_end)
+    if run == 'OpenMP':
+        # call c extension with openMP
+        epoch_dev, epoch_samples = helpers.proc_epochs_openmp(np.asarray(times), np.asarray(samples), 
+                                                        epoch_start, epoch_end)
+
     # create data frame and write to csv
     temp_dict = {'start'    : epoch_start,
                  'end'      : epoch_end,
                  'mean_dev' : epoch_dev,
-                 'n_samples': epoch_samples,
-                 'locf'     : epoch_locf}
+                 'n_samples': epoch_samples}
+    
+    # do LOCF imputation
+    if locf:
+
+        if run == 'Python':
+            epoch_locf = []
+            for i in range(n_epochs):
+    
+                if epoch_samples[i] > 0:
+                    epoch_locf.append(epoch_dev[i])
+            
+                if epoch_samples[i] == 0:
+                    epoch_locf.append(epoch_locf[i - 1])
+            
+            temp_dict['locf'] = epoch_locf
+                    
+        if run == 'Cython':
+            # call c extension
+            temp_dict['locf'] = np.asarray( helpers.proc_locf_cython(epoch_dev, epoch_samples) )
+        
+        if run == 'OpenMP':
+            # call c extension
+            temp_dict['locf'] = np.asarray( helpers.proc_locf_cython(epoch_dev, epoch_samples) )
 
     epochs = pd.DataFrame.from_dict(temp_dict)
     epochs.index = range(len(epochs))    
@@ -198,12 +258,12 @@ def get_epochs(sigmag, start, end, locf = True):
 # [id, date, time_start, time_end]
 ####################################
 
-def process_data(record, directory):
+def process_data(record, data_directory, output_directory, run = 'OpenMP'):
             
     idd, date, t0, t1 = record
     
     # get phone type
-    id_dir = directory +  'raw_unzipped/' + idd + '/identifiers/'
+    id_dir = data_directory +  'raw_unzipped/' + idd + '/identifiers/'
     identifier = os.listdir(id_dir)[0]    
     temp = open(id_dir + identifier, 'r').readlines()
     if temp[1].find('iPhone') > -1:
@@ -212,7 +272,7 @@ def process_data(record, directory):
         phone_type = 'Android'
         
     # get start/end times for each raw file
-    raw_dir = directory + 'raw_unzipped/' + idd + '/accelerometer/'
+    raw_dir = data_directory + 'raw_unzipped/' + idd + '/accelerometer/'
     raw_files = os.listdir(raw_dir)
     file_info = []    
     for f in raw_files:
@@ -240,10 +300,10 @@ def process_data(record, directory):
         day_stack['z'] = gee * day_stack['z']
 
     # get epochs
-    epochs = get_epochs(day_stack, tt0, tt1)
+    epochs = get_epochs(day_stack, run = run)
     
     # write to file
-    destination = directory + 'proc_data/' + idd + '/'
+    destination = output_directory + 'proc_data/' + idd + '/'
     if not os.path.exists(destination):
         os.makedirs(destination)
 
@@ -252,32 +312,27 @@ def process_data(record, directory):
                      sep = ',', header = True, index = False)
     epochs.   to_csv(destination + idd + '_' + 'epochs' + '_' + fix_date + '_' + t0 + '-' + t1 + '.csv',
                      sep = ',', header = True, index = False)
-    
+        
     print 'Processed', len(to_stack), 'files for', idd, 'from', date + '.'
             
         
 ####################################
+# - updated with MPI code
 # Find 54.9%ile cutoffs for each
 # participant in records
 ####################################
 
-def get_cutoffs(records, directory):
+def get_cutoff(idd, output_directory):
     
-    idds = list(set([r[0] for r in records]))
+    idd_dir = output_directory + 'proc_data/' + idd + '/'
+    files = [f for f in os.listdir(idd_dir) if f.find('epochs') > -1]
+    mads = []
+    for f in files:
+        mads = mads + list(pd.read_csv(idd_dir + f)['mean_dev'])
+    mads = [i for i in mads if not np.isnan(i)]
+    cutoff = np.percentile(mads, 54.9)
 
-    cutoff_dict = {}
-            
-    for idd in idds:
-        idd_dir = directory + 'proc_data/' + idd + '/'
-        files = [f for f in os.listdir(idd_dir) if f.find('epochs') > -1]
-        mads = []
-        for f in files:
-            mads = mads + list(pd.read_csv(idd_dir + f)['mean_dev'])
-        mads = [i for i in mads if not np.isnan(i)]
-        cutoff_dict[idd] = np.percentile(mads, 54.9)
-    
-    print 'Calculated cutoffs for', len(idds), 'participants.'                
-    return cutoff_dict
+    return cutoff
 
     
 ####################################
@@ -285,31 +340,39 @@ def get_cutoffs(records, directory):
 # epoch data
 ####################################
 
-def activity_class(cutoffs, directory):
+def activity_class(cutoffs, output_directory):
 
-    proc_dir = directory + 'proc_data/'
+    comm = MPI.COMM_WORLD
+    rank = MPI.COMM_WORLD.Get_rank()
+    size = MPI.COMM_WORLD.Get_size()
+    
+    proc_dir = output_directory + 'proc_data/'
     idds = os.listdir(proc_dir)
 
     file_count = 0
     
-    for idd in idds:
-        work_dir = proc_dir + idd + '/'
-        files = [f for f in os.listdir(work_dir) if f.find('epochs') > -1]
-        
-        for f in files:
-            file_count += 1
-            temp = pd.read_csv(work_dir + f)            
-            c = cutoffs[idd]   
-            mad = temp['mean_dev']
-            b = mad > c
-            temp['activity'] = b.astype(int)
-            temp.to_csv(work_dir + f,
-                        sep = ',', header = True, index = False)
-
-    print 'Appended activity classification to', file_count, 'files.'
+    #for idd in idds:
+    for i in range(len(idds)):
+        if i%size == rank:
+            
+            idd = idds[i]
+            work_dir = proc_dir + idd + '/'
+            files = [f for f in os.listdir(work_dir) if f.find('epochs') > -1]
+            
+            for f in files:
+                file_count += 1
+                temp = pd.read_csv(work_dir + f)            
+                c = cutoffs[idd]   
+                mad = temp['mean_dev']
+                b = mad > c
+                temp['activity'] = b.astype(int)
+                temp.to_csv(work_dir + f,
+                            sep = ',', header = True, index = False)
+    
+    comm.Barrier()
+    print 'Rank', rank, 'has appended activity classification to', file_count, 'files.'
 
     
-
 #########################################
 # Generate summary plots.
 # Optionally, save a copy to directory.
@@ -390,62 +453,6 @@ def plot_summary(t, sigmag, t_epochs, mad, activity, record, cutoff, directory =
 
     
 ####################################
-# Generate summaries and plots from 
-# processed data.
-# Write summaries to output file.
-####################################
-    
-def summarize(records, cutoffs, directory, plot = True):    
-    
-    for r in records:
-        
-        idd, date, t0, t1 = r
-        cutoff = cutoffs[idd]
-        fix_date = date.replace('/', '-')
-
-        data_name = 'proc_data/' + idd + '/' + idd + '_' + 'data' + '_' + fix_date + '_' + t0 + '-' + t1 + '.csv'
-        epochs_name = 'proc_data/' + idd + '/' + idd + '_' + 'epochs' + '_' + fix_date + '_' + t0 + '-' + t1 + '.csv'
-        
-        temp_data   = pd.read_csv(directory + data_name)
-        temp_epochs = pd.read_csv(directory + epochs_name)
-                
-        # generate plots        
-        if plot:
-            t      = temp_data['timestamp']
-            sigmag = temp_data['sig_mag']        
-            
-            t_epochs = temp_epochs['start'] + (2.5 * second)
-            mad      = temp_epochs['mean_dev']
-            activity = temp_epochs['activity']
-    
-            plot_summary(t, sigmag, t_epochs, mad, activity, r, cutoff, directory)
-
-        # generate some summaries        
-        mean_Hz = np.mean(temp_epochs['n_samples'])/5
-        prop_zero = (0.0 + len([i for i in temp_epochs['n_samples'] if i == 0])) / len(temp_epochs)
-        summary = [len(temp_data), len(temp_epochs), mean_Hz, prop_zero, cutoff]
-        
-        # write to output summary        
-        output = directory + 'output_summary.csv'
-        if os.path.exists(output):
-            temp = open(output, 'a')
-            to_write = ','.join(r) + ',' + ','.join(str(x) for x in summary) + ',,,'
-            temp.write(to_write + '\n')
-            temp.close()
-            
-        else:
-            summary_labels = ['user_id', 'date', 'time_start', 'time_end',
-                              'n_obs', 'n_epochs', 'mean_Hz', 'prop_zero',
-                              'cutoff', 'median_act', 'alpha_act', 'median_sed', 'alpha_sed']
-            temp = pd.DataFrame(index = np.asarray([0]), 
-                                columns = summary_labels)
-            temp.loc[0] = r + summary + list(np.repeat(np.nan, 4))
-            temp.to_csv(output, sep = ',', header = True, index = False)
-    
-    print 'Generated summaries for', len(records), 'records.'
-
-
-####################################
 # Get burst lengths and sedentary times,
 # return as data frame.
 ####################################
@@ -507,6 +514,7 @@ def get_times(activity):
     return [burst_lengths, ie_times]
 
 
+
 ####################################
 # Plot summaries of active and 
 # sedentary periods.
@@ -551,7 +559,7 @@ def activity_plots(activity, times, title, path_prefix = None):
 
     powerlaw.Fit(times[0], xmin = 1, discrete = True).power_law.plot_pdf(ax = a1, color = 'g', linewidth = 2, label = 'Power Law fit')
     powerlaw.Fit(times[0], xmin = 1, discrete = True).lognormal.plot_pdf(ax = a1, color = 'r', linewidth = 2, label = 'Lognormal fit')
-    #powerlaw.Fit(times[0], xmin = 1, discrete = True).exponential.plot_pdf(ax = a1, color = 'r', label = 'Exponential fit')
+    #powerlaw.Fit(times[0], xmin = 1, discret#e = True).exponential.plot_pdf(ax = a1, color = 'r', label = 'Exponential fit')
     #powerlaw.Fit(times[0], xmin = 1, discrete = True).stretched_exponential.plot_pdf(ax = a1, color = 'b', label = 'Stretched Expo fit')
     #powerlaw.Fit(times[0], xmin = 1, discrete = True).truncated_power_law.plot_pdf(ax = a1, color = 'b', label = 'Trunc. Power Law fit')
     powerlaw.plot_pdf(times[0], ax = a1, color = 'b', linestyle = 'None', marker = 'o', alpha = 0.75, label = 'Empirical PDF')
@@ -618,115 +626,220 @@ def activity_plots(activity, times, title, path_prefix = None):
 
 
 ####################################
-# Get activity date,
+# This function combines summarize() and analyze_activity()
+# Generate summaries and plots from 
+# processed data.
+# Write summaries to output file.
+# Get activity data,
 # plot summaries, 
 # and write results to file.
 ####################################
-
-def analyze_activity(directory, plot = True):
-
-    output = pd.read_csv(directory + 'output_summary.csv')
-    update = pd.DataFrame(index = np.arange(len(output)), columns = output.columns)
     
-    activity_dir = directory + 'activity/'
-    if not os.path.exists(activity_dir):
-        os.makedirs(activity_dir)
+def summarize_analyze_activity(record, cutoffs, directory, plot = True, run = 'OpenMP'):    
+    
+    idd, date, t0, t1 = record
+    cutoff = cutoffs[idd]
+    fix_date = date.replace('/', '-')
 
-    for i in range(len(output)):
-        idd, date, t0, t1 = list(output.iloc[i])[0:4]
-        fix_date = date.replace('/', '-')
-        epoch_file = directory + 'proc_data/' + idd + '/' + idd + '_epochs_' + fix_date + '_' + t0 + '-' + t1 + '.csv'
-        activity = pd.read_csv(epoch_file)['activity']
-        times = get_times(activity)
-
-        # save record of activity        
-        temp = {'active_bursts': times[0], 'sedent_periods': times[1]}
-        write_to = activity_dir + idd + '_' + fix_date + '_activity.csv'
-        pd.DataFrame.from_dict(temp).to_csv(write_to, sep = ',', header = True, index = False)
-
-        # drop leading 'None' from times[0] if necessary
-        times[0] = [t for t in times[0] if t != None]        
-
-        # drop trailing 'None' from times[1] if necessary
-        times[1] = [t for t in times[1] if t != None]        
-
-        # generate plots
-        if plot:        
-            title = 'Activity for ' + idd + ' on ' + date
-            destination_prefix = activity_dir + idd + '_' + fix_date
-            activity_plots(activity, times, title, destination_prefix)
+    # summarize data    
+    data_name = 'proc_data/' + idd + '/' + idd + '_' + 'data' + '_' + fix_date + '_' + t0 + '-' + t1 + '.csv'
+    epochs_name = 'proc_data/' + idd + '/' + idd + '_' + 'epochs' + '_' + fix_date + '_' + t0 + '-' + t1 + '.csv'
+    
+    temp_data   = pd.read_csv(directory + data_name)
+    temp_epochs = pd.read_csv(directory + epochs_name)
+            
+    # generate summary plots        
+    if plot:
+        t      = temp_data['timestamp']
+        sigmag = temp_data['sig_mag']        
         
-        # update output summary file        
-        median_act = np.median(times[0])
-        alpha_act  = powerlaw.Fit(times[0], xmin = 1, discrete = True).alpha
-        median_sed = np.median(times[1])
-        alpha_sed  = powerlaw.Fit(times[1], xmin = 1, discrete = True).alpha
+        t_epochs = temp_epochs['start'] + (2.5 * second)
+        mad      = temp_epochs['mean_dev']
+        activity = temp_epochs['activity']
 
-        update.iloc[i] = list(output.iloc[i])[0:9] + [median_act, alpha_act, median_sed, alpha_sed]
+        plot_summary(t, sigmag, t_epochs, mad, activity, record, cutoff, directory)
 
-    update.to_csv(directory + 'output_summary.csv', sep = ',', header = True, index = False)
-    print 'Activity analysis for', len(output), 'records is finished.'
+    # generate some summaries        
+    mean_Hz = np.mean(temp_epochs['n_samples'])/5
+    prop_zero = (0.0 + len([i for i in temp_epochs['n_samples'] if i == 0])) / len(temp_epochs)
+    summary = [len(temp_data), len(temp_epochs), mean_Hz, prop_zero, cutoff]
+
+    # analyze activity    
+    activity_dir = directory + 'activity/'
+
+    activity = temp_epochs['activity']
+
+    if run == 'Python':
+        times = get_times( activity )
+        
+    if run == 'Cython':        
+        # call c extension with openMP       
+        times = helpers.get_times_cython( np.asarray(activity) )
+
+    if run == 'OpenMP':
+        # call c extension with openMP       
+        times = helpers.get_times_cython( np.asarray(activity) )
+
+    # save record of activity        
+    temp = {'active_bursts': times[0], 'sedent_periods': times[1]}
+    write_to = activity_dir + idd + '_' + fix_date + '_activity.csv'
+    pd.DataFrame.from_dict(temp).to_csv(write_to, sep = ',', header = True, index = False)
+
+    # drop leading 'None' from times[0] if necessary
+    times[0] = [i for i in times[0] if i != None]        
+
+    # drop trailing 'None' from times[1] if necessary
+    times[1] = [i for i in times[1] if i != None]        
+
+    # generate plots
+    if plot:        
+        title = 'Activity for ' + idd + ' on ' + date
+        destination_prefix = activity_dir + idd + '_' + fix_date
+        activity_plots(activity, times, title, destination_prefix)
     
+    # get some activity statistics        
+    median_act = np.median(times[0])
+    alpha_act  = powerlaw.Fit(times[0], xmin = 1, discrete = True).alpha
+    median_sed = np.median(times[1])
+    alpha_sed  = powerlaw.Fit(times[1], xmin = 1, discrete = True).alpha
+
+    stats = [median_act, alpha_act, median_sed, alpha_sed]
+
+    return record + summary + stats
+
     
 ####################################
 # Process data
+# Select optimization according to:
+# 'Python', 'Cython', 'OpenMP'
 ####################################
 
-def proc(data_dir = None):
+def proc(data_directory, run = 'OpenMP', plot = False):
+
+    comm = MPI.COMM_WORLD
+    rank = MPI.COMM_WORLD.Get_rank()
+    size = MPI.COMM_WORLD.Get_size()
     
-    t0 = time.time()
+    if rank == 0:
+        t0 = time.time()
+        
+        # setup single output directory
+        folder_format = 'output_%m-%d-%Y_%H:%M:%S/'
+        output_directory = data_directory + time.strftime(folder_format, time.localtime())
     
+    else:
+        output_directory = None        
+    comm.Barrier()
+
+    output_directory = comm.bcast(output_directory, root = 0)
+    
+        
     # unzip data, assume each participant's data is in a single zip
-    unzip(data_dir)
+    unzip(data_directory)
+    # comm.Barrier()
     
     # get researcher records
-    records = get_records(data_dir)
-    
-    # Process data into days, write signal magnitudes to file    
-    for r in records:
-        process_data(r, data_dir)
-    
-    # Find cutoffs for each participant
-    cutoffs = get_cutoffs(records, data_dir)
-    
-    # Append activity classification to sigmag files    
-    activity_class(cutoffs, data_dir)
-    
-    # Generate plots and write summary file
-    summarize(records, cutoffs, data_dir, plot = False)
-    
-    # Get burst lengths and sedentary
-    # times, estimate paramterers,
-    # write everything to output file.
-    analyze_activity(data_dir, plot = False)
-    
-    # Time results    
-    t = time.time() - t0 # seconds
-    
-    if not os.path.exists(data_dir + 'time.txt'):
-        os.mknod(data_dir + 'time.txt')
-    
-    temp = open(data_dir + 'time.txt', 'a')
-    temp.write(' ' + str(t) + ',')
-    temp.close()    
+    if rank == 0:
+        records = get_records(data_directory)
+    else:
+        records = None    
+    comm.Barrier()
 
-
-
-
-####################################
-#
-#
-####################################
-
-
-####################################
-#
-#
-####################################
-
-
-####################################
-#
-#
-####################################
+    records = comm.bcast(records, root = 0)
         
+    # Process data into days, write signal magnitudes to file    
+    # for r in records:
+    for i in range(len(records)):
+        if i%size == rank:            
+            r = records[i]
+            process_data(r, data_directory, output_directory, run = run)
+    comm.Barrier()
+            
+    # delete unzipped data
+    if rank == 0:
+        shutil.rmtree(data_directory + 'raw_unzipped/', ignore_errors = True)
+
+    # Find cutoffs for each participant
+    if rank == 0:
+        idds = list(set([i[0] for i in records]))
+    else:
+        idds = None
+
+    idds = comm.bcast(idds, root = 0)
+
+    cutoff_list = []
+
+    for i in range(len(idds)):
+        if i%size == rank:		
+            idd = idds[i]		
+            c = get_cutoff(idd, output_directory)
+            cutoff_list.append([idd, c])
+
+    comm.Barrier()
+
+    cutoff_list = comm.gather(cutoff_list, root = 0)
+    
+    if rank == 0:
+        cutoff_list = flatten(cutoff_list)
+        cutoffs = {}
+        for c in cutoff_list:
+            cutoffs[c[0]] = c[1]        
+        print 'Calculated cutoffs for', len(idds), 'participants:', cutoffs
+    else:
+        cutoffs = None
+
+    cutoffs = comm.bcast(cutoffs, root = 0)
+
+    # Append activity classification to sigmag files    
+    activity_class(cutoffs, output_directory)
+    comm.Barrier()
+    
+    # Generate plots and write summary file,
+    # get burst lengths and sedentary
+    # times, estimate parameters,
+    # write everything to output file.
+    if rank == 0:
+        activity_dir = output_directory + 'activity/'
+        if not os.path.exists(activity_dir):
+            os.makedirs(activity_dir)
+
+    summary_list = []
+        
+    for i in range(len(records)):
+        if i%size == rank:            
+            r = records[i]
+            s = summarize_analyze_activity(r, cutoffs, output_directory, plot = plot, run = 'OpenMP')
+            summary_list.append(s)
+            
+    comm.Barrier()
+
+    summary_list = comm.gather(summary_list, root = 0)
+        
+    if rank == 0:    
+        summary_list = flatten(summary_list)
+
+        summary_file = data_directory + 'output_summary.csv'
+            
+        summary_labels = ['user_id', 'date', 'time_start', 'time_end',
+                          'n_obs', 'n_epochs', 'mean_Hz', 'prop_zero',
+                          'cutoff', 'median_act', 'alpha_act', 'median_sed', 'alpha_sed']
+        temp = pd.DataFrame(index = np.arange(len(summary_list)), columns = summary_labels)
+        for i in range(len(summary_list)):
+            temp.loc[i] = summary_list[i]
+        
+        temp.to_csv(summary_file, sep = ',', header = True, index = False)
+
+    # Time results        
+    if rank == 0:
+        t = time.time() - t0 # seconds
+    
+        if not os.path.exists(data_directory + 'time.txt'):
+            os.mknod(data_directory + 'time.txt')
+    
+        temp = open(data_directory + 'time.txt', 'a')
+        temp.write(' ' + str(t) + ',')
+        temp.close()    
+
+    
+
+

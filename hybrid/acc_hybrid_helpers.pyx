@@ -4,9 +4,12 @@
 # at commandline:
 # python setup.py build_ext --inplace
 # then:
-# import acc_c_helpers
+# import acc_parallel_helpers
 
 cimport cython
+cimport openmp
+from cython.parallel import prange, parallel
+from cython import boundscheck, wraparound
 
 import  numpy as np
 cimport numpy as np
@@ -23,13 +26,15 @@ hour   = 60*minute
 day    = 24*hour
 
 #####################################
-# Helper for get_epochs
+# Helpers for get_epochs
 #   - input signal magnitude data as np.array([times, samples])
 #   - calculate mean absolute deviation for each epoch
 #   - count samples for each epoch
 #####################################
-
-cpdef proc_epochs(long[:] times, double[:] samples, 
+        
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cpdef proc_epochs_cython(long[:] times, double[:] samples, 
                   long[:] epoch_start, long[:] epoch_end):
     
     cdef long i, j, e0, e1
@@ -53,7 +58,56 @@ cpdef proc_epochs(long[:] times, double[:] samples,
         
     return mean_dev, n_samples
 
+    
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cpdef proc_epochs_openmp(np.ndarray[long, ndim = 1] times, 
+                  np.ndarray[double, ndim = 1] samples, 
+                  np.ndarray[long, ndim = 1] epoch_start, 
+                  np.ndarray[long, ndim = 1] epoch_end):
+    
+    cdef long i, j, k, e0, e1, count
+    cdef long n_epochs = len(epoch_start)
+    cdef long N = len(times)
+    cdef double total
+    cdef double gee = 9.80665
 
+    cdef np.ndarray[double, ndim = 1] asg = np.absolute(samples - gee)
+    
+    cdef np.ndarray[double, ndim = 1] mean_dev = np.repeat(np.nan, n_epochs)
+    cdef np.ndarray[double, ndim = 1] n_samples  = np.zeros(n_epochs)
+        
+    for i in prange(n_epochs, nogil = True, schedule = dynamic, num_threads = 32):
+        
+        k = n_epochs - (i + 1)
+        
+        e0 = epoch_start[k]
+        e1 = epoch_end[k]
+        count = 0
+        total = 0
+        j = 0
+        
+        while (j < N):
+            
+            if times[j] < e0:
+                j += 1
+            
+            if times[j] >= e0 and times[j] <= e1:
+                count = count + 1       # can't use += without causing 'read reduction variable' error
+                total = total + asg[j]  # can't use += without causing 'read reduction variable' error
+                j += 1
+        
+            if times[j] > e1:
+                j = N
+
+        if count > 0:             
+            mean_dev[i] = total / count
+        
+        n_samples[k] = count             
+        
+    return mean_dev, n_samples
+    
+    
 #####################################
 # Another helper for get_epochs
 #   - input signal magnitude data as np.array([times, samples])
@@ -61,14 +115,16 @@ cpdef proc_epochs(long[:] times, double[:] samples,
 #   - count samples for each epoch
 #####################################
 
-cpdef double[:] proc_locf(double[:] epoch_dev, double[:] epoch_samples):
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cpdef double[:] proc_locf_cython(double[:] epoch_dev, double[:] epoch_samples):
     
     cpdef long i
     cpdef double[:] epoch_locf = np.repeat(np.nan, len(epoch_dev))
     
     for i in range(len(epoch_samples)):    
 
-        if epoch_samples[i] != 0:
+        if epoch_samples[i] != 0 or i == 0:
             epoch_locf[i] = epoch_dev[i]
 
         else:
@@ -82,7 +138,9 @@ cpdef double[:] proc_locf(double[:] epoch_dev, double[:] epoch_samples):
 #   - Get burst lengths and sedentary times
 ####################################
 
-cpdef get_times(long[:] activity):
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cpdef get_times_cython(long[:] activity):
 
     burst_lengths = []
     ie_times      = []
@@ -138,8 +196,3 @@ cpdef get_times(long[:] activity):
                     ie_times.append(sed_count)    
                     
     return [burst_lengths, ie_times]
-
-
-
-
-

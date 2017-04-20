@@ -11,11 +11,12 @@ import numpy as np
 import time
 import os
 import zipfile
+import shutil        
 import powerlaw
 
 from statsmodels.tsa.stattools import acf
 
-import acc_parallel_helpers as parallel_helpers
+import acc_helpers as helpers
 
 
 #########################################
@@ -139,7 +140,7 @@ def sigmag(raw, phone_type):
 # epochs with no samples.
 #########################################
 
-def get_epochs(sigmag, locf = True):
+def get_epochs(sigmag, locf = True, run = 'Cython'):
         
     times = sigmag['timestamp'] 
     samples = sigmag['sig_mag']
@@ -151,22 +152,63 @@ def get_epochs(sigmag, locf = True):
     n_epochs = len(epoch_start)
     epoch_end = epoch_start + (5*1000) - 1
 
-    # call c extension with openMP
     # calculate mean absolute deviation for each epoch
     # count samples for each epoch        
-    epoch_dev, epoch_samples = parallel_helpers.proc_epochs(np.asarray(times), np.asarray(samples), 
-                                                    epoch_start, epoch_end)
+    if run == 'Python':
+        epoch_dev = []
+        epoch_samples = []
+        
+        for i in range(n_epochs):
+            
+            e0 = epoch_start[i]
+            e1 = epoch_end[i]
+            temp = sigmag.loc[ (sigmag['timestamp'] >= e0) & (sigmag['timestamp'] <= e1) ]
+            samples = np.asarray(temp['sig_mag'])
+            
+            if len(samples) > 0:             
+                mean_dev = np.mean(abs(samples - gee))
+            if len(samples) == 0:
+                mean_dev = None
+                 
+            epoch_dev.append(mean_dev)
+            epoch_samples.append(len(samples))       
+                
+    if run == 'Cython':
+        epoch_dev, epoch_samples = helpers.proc_epochs_cython(np.asarray(times), np.asarray(samples), 
+                                                        epoch_start, epoch_end)
+    if run == 'OpenMP':
+        # call c extension with openMP
+        epoch_dev, epoch_samples = helpers.proc_epochs_openmp(np.asarray(times), np.asarray(samples), 
+                                                        epoch_start, epoch_end)
 
     # create data frame and write to csv
     temp_dict = {'start'    : epoch_start,
                  'end'      : epoch_end,
                  'mean_dev' : epoch_dev,
                  'n_samples': epoch_samples}
-
-    # call c extension with openMP
+    
     # do LOCF imputation
     if locf:
-        temp_dict['locf'] = np.asarray( parallel_helpers.proc_locf(epoch_dev, epoch_samples) )
+
+        if run == 'Python':
+            epoch_locf = []
+            for i in range(n_epochs):
+    
+                if epoch_samples[i] > 0:
+                    epoch_locf.append(epoch_dev[i])
+            
+                if epoch_samples[i] == 0:
+                    epoch_locf.append(epoch_locf[i - 1])
+            
+            temp_dict['locf'] = epoch_locf
+                    
+        if run == 'Cython':
+            # call c extension
+            temp_dict['locf'] = np.asarray( helpers.proc_locf_cython(epoch_dev, epoch_samples) )
+        
+        if run == 'OpenMP':
+            # call c extension
+            temp_dict['locf'] = np.asarray( helpers.proc_locf_cython(epoch_dev, epoch_samples) )
 
     epochs = pd.DataFrame.from_dict(temp_dict)
     epochs.index = range(len(epochs))    
@@ -179,12 +221,12 @@ def get_epochs(sigmag, locf = True):
 # [id, date, time_start, time_end]
 ####################################
 
-def process_data(record, directory):
+def process_data(record, data_directory, output_directory, run = 'Cython'):
             
     idd, date, t0, t1 = record
     
     # get phone type
-    id_dir = directory +  'raw_unzipped/' + idd + '/identifiers/'
+    id_dir = data_directory +  'raw_unzipped/' + idd + '/identifiers/'
     identifier = os.listdir(id_dir)[0]    
     temp = open(id_dir + identifier, 'r').readlines()
     if temp[1].find('iPhone') > -1:
@@ -193,7 +235,7 @@ def process_data(record, directory):
         phone_type = 'Android'
         
     # get start/end times for each raw file
-    raw_dir = directory + 'raw_unzipped/' + idd + '/accelerometer/'
+    raw_dir = data_directory + 'raw_unzipped/' + idd + '/accelerometer/'
     raw_files = os.listdir(raw_dir)
     file_info = []    
     for f in raw_files:
@@ -221,10 +263,10 @@ def process_data(record, directory):
         day_stack['z'] = gee * day_stack['z']
 
     # get epochs
-    epochs = get_epochs(day_stack)
+    epochs = get_epochs(day_stack, run = run)
     
     # write to file
-    destination = directory + 'proc_data/' + idd + '/'
+    destination = output_directory + 'proc_data/' + idd + '/'
     if not os.path.exists(destination):
         os.makedirs(destination)
 
@@ -233,7 +275,7 @@ def process_data(record, directory):
                      sep = ',', header = True, index = False)
     epochs.   to_csv(destination + idd + '_' + 'epochs' + '_' + fix_date + '_' + t0 + '-' + t1 + '.csv',
                      sep = ',', header = True, index = False)
-    
+        
     print 'Processed', len(to_stack), 'files for', idd, 'from', date + '.'
             
         
@@ -242,14 +284,14 @@ def process_data(record, directory):
 # participant in records
 ####################################
 
-def get_cutoffs(records, directory):
+def get_cutoffs(records, output_directory):
     
     idds = list(set([r[0] for r in records]))
 
     cutoff_dict = {}
             
     for idd in idds:
-        idd_dir = directory + 'proc_data/' + idd + '/'
+        idd_dir = output_directory + 'proc_data/' + idd + '/'
         files = [f for f in os.listdir(idd_dir) if f.find('epochs') > -1]
         mads = []
         for f in files:
@@ -266,9 +308,9 @@ def get_cutoffs(records, directory):
 # epoch data
 ####################################
 
-def activity_class(cutoffs, directory):
+def activity_class(cutoffs, output_directory):
 
-    proc_dir = directory + 'proc_data/'
+    proc_dir = output_directory + 'proc_data/'
     idds = os.listdir(proc_dir)
 
     file_count = 0
@@ -533,7 +575,7 @@ def activity_plots(activity, times, title, path_prefix = None):
 
     powerlaw.Fit(times[0], xmin = 1, discrete = True).power_law.plot_pdf(ax = a1, color = 'g', linewidth = 2, label = 'Power Law fit')
     powerlaw.Fit(times[0], xmin = 1, discrete = True).lognormal.plot_pdf(ax = a1, color = 'r', linewidth = 2, label = 'Lognormal fit')
-    #powerlaw.Fit(times[0], xmin = 1, discrete = True).exponential.plot_pdf(ax = a1, color = 'r', label = 'Exponential fit')
+    #powerlaw.Fit(times[0], xmin = 1, discret#e = True).exponential.plot_pdf(ax = a1, color = 'r', label = 'Exponential fit')
     #powerlaw.Fit(times[0], xmin = 1, discrete = True).stretched_exponential.plot_pdf(ax = a1, color = 'b', label = 'Stretched Expo fit')
     #powerlaw.Fit(times[0], xmin = 1, discrete = True).truncated_power_law.plot_pdf(ax = a1, color = 'b', label = 'Trunc. Power Law fit')
     powerlaw.plot_pdf(times[0], ax = a1, color = 'b', linestyle = 'None', marker = 'o', alpha = 0.75, label = 'Empirical PDF')
@@ -605,7 +647,7 @@ def activity_plots(activity, times, title, path_prefix = None):
 # and write results to file.
 ####################################
 
-def analyze_activity(directory, plot = True):
+def analyze_activity(directory, plot = True, run = 'Cython'):
 
     output = pd.read_csv(directory + 'output_summary.csv')
     update = pd.DataFrame(index = np.arange(len(output)), columns = output.columns)
@@ -620,9 +662,17 @@ def analyze_activity(directory, plot = True):
         epoch_file = directory + 'proc_data/' + idd + '/' + idd + '_epochs_' + fix_date + '_' + t0 + '-' + t1 + '.csv'
         activity = pd.read_csv(epoch_file)['activity']
 
-        # call c extension with openMP       
-        times = parallel_helpers.get_times( np.asarray(activity) )
-        
+        if run == 'Python':
+            times = get_times( activity )
+            
+        if run == 'Cython':        
+            # call c extension with openMP       
+            times = helpers.get_times_cython( np.asarray(activity) )
+
+        if run == 'OpenMP':
+            # call c extension with openMP       
+            times = helpers.get_times_cython( np.asarray(activity) )
+
         # save record of activity        
         temp = {'active_bursts': times[0], 'sedent_periods': times[1]}
         write_to = activity_dir + idd + '_' + fix_date + '_activity.csv'
@@ -654,63 +704,51 @@ def analyze_activity(directory, plot = True):
     
 ####################################
 # Process data
+# Select optimization according to:
+# 'Python', 'Cython', 'OpenMP'
 ####################################
 
-def proc(data_dir = None):
+def proc(data_directory, output_directory, run = 'Cython', plot = False):
     
     t0 = time.time()
     
     # unzip data, assume each participant's data is in a single zip
-    unzip(data_dir)
+    unzip(data_directory)
     
     # get researcher records
-    records = get_records(data_dir)
+    records = get_records(data_directory)
     
     # Process data into days, write signal magnitudes to file    
     for r in records:
-        process_data(r, data_dir)
-    
+        process_data(r, data_directory, output_directory, run = run)
+
+    # delete unzipped data
+    shutil.rmtree(data_directory + 'raw_unzipped/', ignore_errors = True)
+
     # Find cutoffs for each participant
-    cutoffs = get_cutoffs(records, data_dir)
+    cutoffs = get_cutoffs(records, output_directory)
     
     # Append activity classification to sigmag files    
-    activity_class(cutoffs, data_dir)
+    activity_class(cutoffs, output_directory)
     
     # Generate plots and write summary file
-    summarize(records, cutoffs, data_dir, plot = False)
+    summarize(records, cutoffs, output_directory, plot = plot)
     
     # Get burst lengths and sedentary
     # times, estimate paramterers,
     # write everything to output file.
-    analyze_activity(data_dir, plot = False)
+    analyze_activity(output_directory, plot = plot, run = run)
     
     # Time results    
     t = time.time() - t0 # seconds
     
-    if not os.path.exists(data_dir + 'time.txt'):
-        os.mknod(data_dir + 'time.txt')
+    if not os.path.exists(data_directory + 'time.txt'):
+        os.mknod(data_directory + 'time.txt')
     
-    temp = open(data_dir + 'time.txt', 'a')
+    temp = open(data_directory + 'time.txt', 'a')
     temp.write(' ' + str(t) + ',')
     temp.close()    
 
+    
 
 
-
-####################################
-#
-#
-####################################
-
-
-####################################
-#
-#
-####################################
-
-
-####################################
-#
-#
-####################################
-        
