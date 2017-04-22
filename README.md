@@ -54,12 +54,11 @@ After implementing the accelerometer data processing code in Python, several key
 
 !["runtime plots"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/runtime_plots.png)
 
-Each version of the code was benchmarked on a small data set containing 62 hours of accelerometer observations from two participants.  Computation took place on the Odyssey Cluster's `seas_iacs` partition.  Preliminary versions of the code were run on individual nodes equipped with 32 CPUs; hybrid code was run on four such nodes.  Estimates were obtained by averaging runtimes for five repetitions of the data processing task.  The above plots show estimated processing speeds, in seconds per hour of accelerometer data, as well as speedups relative to the baseline of unaccelerated Python code.
+Each version of the code was benchmarked on a small data set containing 62 hours of accelerometer observations from two participants (130 MB).  Additional benchmarks were obtained with data from a simulated pilot study in which ten hypothetical participants contributed data for two weeks (2100 hours of accelerometer observations, 17 GB).
 
-On a single node with 32 processors, the use of C extensions improves runtime by a factor of almost 2.5, and OpenMP functionality yields a speedup factor of over 3.5.  On four contiguous nodes, the hybrid code is over 4.5 times as fast as unaccelerated Python code.  Prior to optimization, each hour of accelerometer data took about 2.5 seconds to process; the optimizations bring this time to under 0.6 seconds.
+Computation took place on the Odyssey Cluster's `seas_iacs` partition.  Preliminary versions of the code were run on individual nodes equipped with 32 CPUs; hybrid code was run on four such nodes.  Estimates for the actual data set were calculated by averaging runtimes for five repetitions of the data processing task.  For the simulated data, the task was completed only once by each version of the code.  The above plots show estimated processing speeds, in seconds per hour of accelerometer data, as well as speedups relative to the baseline of unaccelerated Python code.
+
+On a single node with 32 processors, the use of C extensions improves runtime by a factor of about 2, and OpenMP functionality yields a speedup factor of over 3.5.  On four contiguous nodes, the hybrid code is over 4.5 times as fast as unaccelerated Python code for the actual data task, and almost 14 times as fast for the larger hypothetical data task.  The difference may be due, in part, to startup costs associated with unzipping compressed files.  Only the hybrid code implements concurrent decompression, a considerable advantage for data sets that contain numerous zipped directories.  Prior to optimization, each hour of accelerometer data took multiple seconds to process; the hybrid code brings this processing time to under 0.6 seconds.
 
 
 ## Stage 2:  Imputation for Missing Accelerometer Data
-
-
-
