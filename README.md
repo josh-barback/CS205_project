@@ -83,12 +83,12 @@ Physical activity, like many other human behaviors, is *bursty* and *correlated*
 
 The observed active burst lengths (green) and the observed sedentary period lengths (blue) are taken as samples from the corresponding distributions.
 
-The densities of these two distributions appear linear on a log-log plot, as shown below.  The power law is one possible candidate for a parametric model for these distributions.
+The densities of these two distributions appear linear on a log-log plot, as shown below.  The power law is one possible candidate for a parametric model for these distributions.  Fitting a power law corresponds to estimation of the exponent in the density *P*(*x*) ~ *x*<sup>a</sup>.  There are a number of subtleties associated with fitting heavy-tailed distributions to data [7]; many of the relevant methods have been implemented in the Python package `powerlaw` [8].
 
-!["histograms"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/histogram_fit.png)
+!["histograms"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/histograms_fit.png)
 
-Fitting a power law corresponds to estimation of the exponent in the density *P*(*x*) ~ *x*<sup>-$\alpha$</sup>.  There are a number of subtleties associated with fitting heavy-tailed distributions to data [7]; many of the relevant methods have been implemented in the Python package `powerlaw` [8].
 
+Imputation [9]
 
 
 ## Hybrid Code for Multiple Imputation
@@ -104,17 +104,22 @@ Fitting a power law corresponds to estimation of the exponent in the density *P*
 ## References
 
 [1] (https://www.hsph.harvard.edu/onnela-lab/)
+
 [2] del Rosario, M. B., Redmond, S. J. & Lovell, N. H. Tracking the Evolution of Smartphone Sensing for Monitoring Human Movement. *Sensors* (Basel) 15, 18901–18933 (2015).
+
 [3] Mitchell, E., Monaghan, D. & O’Connor, N. E. Classification of Sporting Activities Using Smartphone Accelerometers. *Sensors* (Basel) 13, 5317–5337 (2013).
+
 [4] Lau, S. L. & David, K. Movement recognition using the accelerometer in smartphones. in *2010 Future Network Mobile Summit* 1–9 (2010).
+
 [5] Matthews, C. E. et al. Amount of Time Spent in Sedentary Behaviors in the United States, 2003–2004. *Am J Epidemiol* 167, 875–881 (2008).
+
 [6] Karsai, M., Kaski, K., Barabási, A.-L. & Kertész, J. Universal features of correlated bursty behaviour. *Scientific Reports* 2, 397 (2012).
+
 [7] Clauset, A., Shalizi, C. & Newman, M. Power-Law Distributions in Empirical Data. *SIAM Rev.* 51, 661–703 (2009).
+
 [8] Alstott, J., Bullmore, E. & Plenz, D. Powerlaw: a Python package for analysis of heavy-tailed distributions. *PLoS ONE* 9, e85777 (2014).
 
-
-
-[] Catellier, D. J. et al. Imputation of Missing Data When Measuring Physical Activity by Accelerometry. *Medicine & Science in Sports & Exercise* 37, (2005).
+[9] Catellier, D. J. et al. Imputation of Missing Data When Measuring Physical Activity by Accelerometry. *Medicine & Science in Sports & Exercise* 37, (2005).
 
 
 
