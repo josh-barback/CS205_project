@@ -53,22 +53,13 @@ The above plots illustrate several steps in this pipeline, beginning with the si
 
 ## Hybrid Code for Accelerometer Data Processing
 
-The processing pipeline was initially coded in Python.  The optimization approach was twofold.  First, several key segments of code were rewritten as C extensions with Cython, and then implemented as multithreaded algorithms.  This was especially important for calculating five-second averages, a time-consuming computation due to nonuniform accelerometer sampling rates.  Using OpenMP functionality from the `cython.parallel` module, this shared-memory parallel algorithm speeded computation by concurrently performing multiple unbounded searches.
+The processing pipeline was initially coded in Python.  The optimization strategy adopted the hybrid SPMD model, and took place in two stages.  First, several key segments of code were rewritten as C extensions with Cython, and then implemented as multithreaded algorithms.  This was especially important for calculating five-second averages, a time-consuming computation due to nonuniform accelerometer sampling rates.  Using OpenMP functionality from the `cython.parallel` module, this shared-memory parallel algorithm speeded computation by concurrently performing multiple unbounded searches.
 
-In order to address concurrent processing of data from multiple participants, and to accommodate synchronization points involving data from multiple files, an explicit parallel programming approach was adopted for a second level of optimization.  
-
-in the SPMD framework.
-
-MPI - message passing
-
-
-Further optimzation was accomplished with OpenMP and MPI functionality from the `cython.parallel` module and the `mpi4py` package.
-
-
-
-!["runtime plots"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/runtime_plots.png)
+In order to address concurrent processing of data from multiple participants, and to accommodate synchronization points involving data from multiple files, an explicit parallel programming approach was adopted for a second level of optimization.  Of particular interest was coordinating multiple processes prior to identifying individual cutoff points for activity classification, a task that required scanning several processed files from each participant.  This message passing framework was implemented with MPI functionality from the `mpi4py` package.  The final hybrid version of the processing code leveraged resources from not only multiple nodes in a cluster, but also multiple cores.
 
 Each version of the code was benchmarked on a small data set containing 62 hours of accelerometer observations from two participants (130 MB).  Additional benchmarks were obtained with data from a simulated pilot study in which ten hypothetical participants contributed data for two weeks (2100 hours of accelerometer observations, 17 GB).
+
+!["runtime plots"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/runtime_plots.png)
 
 Computation took place on the Odyssey Cluster's `seas_iacs` partition.  Preliminary versions of the code were run on individual nodes equipped with 32 cores; hybrid code was run on four such nodes.  Estimates for the actual data set were calculated by averaging runtimes for five repetitions of the data processing task.  For the simulated data, the task was completed only once by each version of the code.  The above plots show estimated processing speeds, in seconds per hour of accelerometer data, as well as speedups relative to the baseline of unaccelerated Python code.
 
@@ -83,12 +74,16 @@ Physical activity, like many other human behaviors, is *bursty* and *correlated*
 
 The observed active burst lengths (green) and the observed sedentary period lengths (blue) are taken as samples from the corresponding distributions.
 
-The densities of these two distributions appear linear on a log-log plot, as shown below.  The power law is one possible candidate for a parametric model for these distributions.  Fitting a power law corresponds to estimation of the exponent in the density *P*(*x*) ~ *x*<sup>a</sup>.  There are a number of subtleties associated with fitting heavy-tailed distributions to data [7]; many of the relevant methods have been implemented in the Python package `powerlaw` [8].
+The densities of these two distributions appear linear on a log-log plot, as shown below.  The power law is one possible candidate for a parametric model for these distributions.  Fitting a power law corresponds to estimation of the exponent in the density *P*(*x*) ~ *x*<sup>*a*</sup>.  There are a number of subtleties associated with fitting heavy-tailed distributions to data [7]; many of the relevant methods have been implemented in the Python package `powerlaw` [8].
 
 !["histograms"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/histograms_fit.png)
 
+Of special concern is the systematic missingness associated with battery-conservation strategies.  Accelerometer data collection over the course of a day may deplete a smartphone's battery by more than 50%.  Therefore, data collection is continuously interrupted.  For example, each minute of accelerometer data may be sandwiched between minutes when the sensor is turned off.
 
-Imputation [9]
+!["missing data"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/missing_data.png)
+
+While this missingness is "uninformative" at the level of the binary time series, longer bursts will be disproportionately interrupted, leading to biased estimates of distribution parameters.  (In the case of the power law exponent, estimates will be biased upwards.)  A possible solution may be a multiple imputation strategy based on stochastic models of the binary time series.  While imputation for accelerometer data has been studied in the past [9], none have examined applications to the estimation of parameters for bursty periods or inter-event times.  
+
 
 
 ## Hybrid Code for Multiple Imputation
@@ -103,7 +98,7 @@ Imputation [9]
 
 ## References
 
-[1] (https://www.hsph.harvard.edu/onnela-lab/)
+[1] https://www.hsph.harvard.edu/onnela-lab/
 
 [2] del Rosario, M. B., Redmond, S. J. & Lovell, N. H. Tracking the Evolution of Smartphone Sensing for Monitoring Human Movement. *Sensors* (Basel) 15, 18901–18933 (2015).
 
