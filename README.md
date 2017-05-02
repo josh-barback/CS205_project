@@ -51,11 +51,15 @@ First, raw hourly data is collected into periods of interest identified by the r
 The above plots illustrate several steps in this pipeline, beginning with the signal magnitude time series at top.  The center plot shows mean absolute deviations from resting acceleration, with the individual cutoff represented by a dashed red line (just above the x-axis).  At bottom, green vertical lines represent epochs that have been classified as *active*.
 
 
-## Hybrid Code for Accelerometer Data Processing
+## Hybrid SPMD Parallelization for Accelerometer Data Processing
+
+# Shared Memory (OpenMP)
 
 The processing pipeline was initially coded in Python.  The optimization strategy adopted the hybrid SPMD model, and took place in two stages.  First, several key segments of code were rewritten as C extensions with Cython, and then implemented as multithreaded algorithms.  This was especially important for calculating five-second averages, a time-consuming computation due to nonuniform accelerometer sampling rates.  Using OpenMP functionality from the `cython.parallel` module, this shared-memory parallel algorithm speeded computation by concurrently performing multiple unbounded searches.
 
-In order to address concurrent processing of data from multiple participants, and to accommodate synchronization points involving data from multiple files, an explicit parallel programming approach was adopted for a second level of optimization.  Of particular interest was coordinating multiple processes prior to identifying individual cutoff points for activity classification, a task that required scanning several processed files from each participant.  This message passing framework was implemented with MPI functionality from the `mpi4py` package.  The final hybrid version of the processing code leveraged resources from not only multiple nodes in a cluster, but also multiple cores.
+# Message-Passing (MPI)
+
+In order to address concurrent processing of data from multiple participants, and to accommodate synchronization points involving data from multiple files, an explicit parallel programming approach was adopted for a second level of optimization.  Of particular interest was coordinating multiple processes prior to identifying individual cutoff points for activity classification, a task that required scanning several processed files from each participant.  This message passing framework was implemented with MPI functionality from the `mpi4py` package.  The final hybrid version of the processing code leverages resources from not only multiple nodes in a cluster, but also multiple cores; this allows relatively large accelerometer data sets (e.g. 100-400 days of data) to be processed in under one hour.
 
 Each version of the code was benchmarked on a small data set containing 62 hours of accelerometer observations from two participants (130 MB).  Additional benchmarks were obtained with data from a simulated pilot study in which ten hypothetical participants contributed data for two weeks (2100 hours of accelerometer observations, 17 GB).
 
@@ -82,11 +86,15 @@ Of special concern is the systematic missingness associated with battery-conserv
 
 !["missing data"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/missing_data.png)
 
-While this missingness is "uninformative" at the level of the binary time series, longer bursts will be disproportionately interrupted, leading to biased estimates of distribution parameters.  (In the case of the power law exponent, estimates will be biased upwards.)  A possible solution may be a multiple imputation strategy based on stochastic models of the binary time series.  While imputation for accelerometer data has been studied in the past [9], none have examined applications to the estimation of parameters for bursty periods or inter-event times.  
+While this missingness is "uninformative" at the level of the binary time series, longer bursts will be disproportionately interrupted, leading to biased estimates of distribution parameters.  (In the case of the power law exponent, estimates will be biased upwards.)  A possible solution may be a multiple imputation strategy based on stochastic models of the binary time series.  While imputation for accelerometer data has been studied in the past [9], estimation of parameters for bursty periods and inter-event times has yet to be examined in this context.
 
 
 
-## Hybrid Code for Multiple Imputation
+## Advanced Features:  Model and Parallelization
+
+# Markov Model
+
+# Parallelization
 
 
 

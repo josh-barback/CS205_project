@@ -13,17 +13,11 @@ warnings.simplefilter(action = 'ignore', category = RuntimeWarning)
 # process data
 import os
 
-#func_dir = '/home/josh/Desktop/Dropbox/_research 2017/work/CS_205 project/mpi_code/'
-#data_dir = '/home/josh/Desktop/Dropbox/_research 2017/work/CS_205 project/final_directory_structure/'
-
-func_dir = '/n/home07/cs205u1703/CS_205/Project/final/hybrid_code/'
-data_dir = '/n/home07/cs205u1703/CS_205/Project/final/data/'
+func_dir = '.../data_hybrid/' # set path to the directory that contains acc_hybrid_functions
+data_dir = '.../data_test/'   # set path to the directory that contains test cases
 
 os.chdir(func_dir)
 import acc_hybrid_functions as acc
-
-#for i in range(5):
-#    acc.proc(data_dir, run = 'OpenMP', plot = False)
 
 acc.proc(data_dir, run = 'OpenMP', plot = False)
 

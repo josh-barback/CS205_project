@@ -12,13 +12,9 @@ warnings.simplefilter(action = 'ignore', category = RuntimeWarning)
 # process data
 import os
 
-#func_dir = '/home/josh/Desktop/Dropbox/_research 2017/work/CS_205 project/impute_code/'
-#data_dir = '/home/josh/Desktop/Dropbox/_research 2017/work/CS_205 project/impute_data/proc_data/u19el13q/'
-#out_dir  = '/home/josh/Desktop/Dropbox/_research 2017/work/CS_205 project/impute_data/'
-
-func_dir = '/n/home07/cs205u1703/CS_205/Project/imputation/impute_code/'
-data_dir = '/n/home07/cs205u1703/CS_205/Project/imputation/impute_data/proc_data/'
-out_dir  = '/n/home07/cs205u1703/CS_205/Project/imputation/impute_data/' 
+func_dir = '.../imputation/' # set path to the directory that contains impute_functions.py
+data_dir = '.../impute_test/'# set path to the directory that contains test cases
+out_dir  = '.../imputation/' # for collection of output, set path to any directory
 
 os.chdir(func_dir)
 import impute_functions as impute
@@ -37,13 +33,8 @@ else:
 output_dir = comm.bcast(output_dir, root = 0)
         
 # set up parameters
-#seconds = [30, 60, 90, 120, 180, 240, 300, 360, 420, 480, 540, 600]
-#seconds = [30, 45, 60, 75, 90, 105, 120]
-seconds = [120, 105, 90, 75, 60, 45, 30]
-#reps = 1000
-reps = 500
-#run = 'Python'
-#run = 'Cython'
+seconds = [30, 45, 60, 75, 90, 105, 120]
+reps = 1000
 
 comm.Barrier()
 
