@@ -46,7 +46,7 @@ The Onnela Lab's Beiwe software collects smartphone sensor data and delivers it 
 
 First, raw hourly data is collected into periods of interest identified by the researcher.  The three time series are then collapsed to a single time series by calculating a *signal magnitude* for each observation; this is simply the length of the observed 3-dimensional acceleration vector.  The signal magnitudes are then compared to the expected resting accelerometer signal magnitude of 1 g; absolute deviations from resting acceleration are averaged over epochs of five seconds.  At this point, all available data from a given participant are examined in order to identify an individual cutoff point that distingushes *active* epochs from *sedentary* epochs; the location of this cutoff is based on the fact that adults spend an average of 54.9% of their awake time in sedentary activity [5].  After this classification is applied, *active bursts* and *sedentary periods* are located by tracking behavior across consecutive epochs; finally, summary statistics for the corresponding distributions are generated.
 
-!["summary plots"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/summary_plots.png)
+!["summary plots"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/images/summary_plots.png)
 
 The above plots illustrate several steps in this pipeline, beginning with the signal magnitude time series at top.  The center plot shows mean absolute deviations from resting acceleration, with the individual cutoff represented by a dashed red line (just above the x-axis).  At bottom, green vertical lines represent epochs that have been classified as *active*.
 
@@ -63,7 +63,7 @@ In order to address concurrent processing of data from multiple participants, an
 
 Each version of the code was benchmarked on a small data set containing 62 hours of accelerometer observations from two participants (130 MB).  Additional benchmarks were obtained with data from a simulated pilot study in which ten hypothetical participants contributed data for two weeks (2100 hours of accelerometer observations, 17 GB).
 
-!["runtime plots"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/runtime_plots.png)
+!["runtime plots"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/images/runtime_plots.png)
 
 Computation took place on the Odyssey Cluster's `seas_iacs` partition.  Preliminary versions of the code were run on individual nodes equipped with 32 cores; hybrid code was run on four such nodes.  Estimates for the actual data set were calculated by averaging runtimes for five repetitions of the data processing task.  For the simulated data, the task was completed only once by each version of the code.  The above plots show estimated processing speeds, in seconds per hour of accelerometer data, as well as speedups relative to the baseline of unaccelerated Python code.
 
@@ -74,17 +74,17 @@ On a single node with 32 processors, the use of C extensions improves runtime by
 
 Physical activity, like many other human behaviors, is *bursty* and *correlated*.  One approach to characterizing such activity is to model the distribution of *bursty periods* and the distribution of *inter-event times* [6].  In the present context, a binary time series of active and sedentary epochs (identified with 1 and 0, respectively) can be aggregated into *active bursts* and *sedentary periods*, as shown below.
 
-!["time series"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/time_series.png)
+!["time series"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/images/time_series.png)
 
 The observed active burst lengths (green) and the observed sedentary period lengths (blue) are taken as samples from the corresponding distributions.
 
 The densities of these two distributions appear linear on a log-log plot, as shown below.  The power law is one possible candidate for a parametric model for these distributions.  Fitting a power law corresponds to estimation of the exponent in the density *P*(*x*) ~ *x*<sup>*a*</sup>.  There are a number of subtleties associated with fitting heavy-tailed distributions to data [7]; many of the relevant methods have been implemented in the Python package `powerlaw` [8].
 
-!["histograms"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/histograms_fit.png)
+!["histograms"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/images/histograms_fit.png)
 
 Of special concern is the systematic missingness associated with battery-conservation strategies.  Accelerometer data collection over the course of a day may deplete a smartphone's battery by more than 50%.  Therefore, data collection is continuously interrupted.  For example, each minute of accelerometer data may be sandwiched between minutes when the sensor is turned off.
 
-!["missing data"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/missing_data.png)
+!["missing data"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/images/missing_data.png)
 
 While this missingness is "uninformative" at the level of the binary time series, longer bursts will be disproportionately interrupted, leading to biased estimates of distribution parameters.  (In the case of the power law exponent, estimates will be biased upwards.)  A possible solution may be a multiple imputation strategy based on stochastic models of the binary time series.  While imputation for accelerometer data has been studied in the past [9], estimation of parameters for bursty periods and inter-event times has yet to be examined in this context.
 
@@ -98,7 +98,7 @@ While this missingness is "uninformative" at the level of the binary time series
 
 
 
-!["imputation results"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/imputation_results.png)
+!["imputation results"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/images/imputation_results.png)
 
 
 
