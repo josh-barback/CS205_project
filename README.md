@@ -53,23 +53,25 @@ The above plots illustrate several steps in this pipeline, beginning with the si
 
 ## Hybrid SPMD Parallelization for Accelerometer Data Processing
 
-# Shared Memory (OpenMP)
+### Shared Memory (OpenMP)
 
-The processing pipeline was initially coded in Python.  The optimization strategy adopted the hybrid SPMD model, and took place in two stages.  First, several key segments of code were rewritten as C extensions with Cython, and then implemented as multithreaded algorithms.  This was especially important for calculating five-second averages, a time-consuming computation due to nonuniform accelerometer sampling rates.  Using OpenMP functionality from the `cython.parallel` module, this shared-memory parallel algorithm speeded computation by concurrently performing multiple unbounded searches.
+The processing pipeline was initially coded in Python.  The optimization strategy adopted the hybrid SPMD model, and took place in two stages.  First, several key segments of code were rewritten as C extensions with Cython, and then implemented as multithreaded algorithms.  This was especially important for calculating five-second averages, a time-consuming computation due to nonuniform accelerometer sampling rates.  Using OpenMP functionality from the `cython.parallel` module, this parallel algorithm speeded computation by concurrently performing multiple unbounded searches.  Speedups and throughput for the shared-memory algorithm are shown below, at left and center.  For a typical dataset of 16 hours processed on 32 cores, throughput approached 8 MFLOP/s and runtime was reduced by a factor of 8.
 
 !["performance"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/images/performance.png)
 
-# Message-Passing (MPI)
+### Message-Passing (MPI)
 
-In order to address concurrent processing of data from multiple participants, and to accommodate synchronization points involving data from multiple files, an explicit parallel programming approach was adopted for a second level of optimization.  Of particular interest was coordinating multiple processes prior to identifying individual cutoff points for activity classification, a task that required scanning several processed files from each participant.  The message passing framework was implemented with MPI functionality from the `mpi4py` package.  The final hybrid version of the processing code leverages resources from not only multiple nodes in a cluster, but also multiple cores; this allows relatively large accelerometer data sets (e.g. 100-400 days of data) to be processed in under one hour.
+In order to address concurrent processing of data from multiple participants, and to accommodate synchronization points involving data from multiple files, an explicit parallel programming approach was adopted for a second level of optimization.  Of particular interest was coordinating multiple processes prior to identifying individual cutoff points for activity classification, a task that required scanning several processed files from each participant.  The message passing framework was implemented with MPI functionality from the `mpi4py` package.  The final hybrid SPMD version of the processing code leverages resources from not only multiple nodes in a cluster, but also multiple cores; this allows relatively large accelerometer data sets (e.g. 100-400 days of data) to be processed in under one hour.  The scaled speedup is above right; performance was evaluated on 1, 2, and 5 nodes with problem sizes corresponding to 70, 140, and 350 simulated days of accelerometer data.
+
+### Results
 
 Each version of the code was benchmarked on a small data set containing 62 hours of accelerometer observations from two participants (130 MB).  Additional benchmarks were obtained with data from a simulated pilot study in which ten hypothetical participants contributed data for two weeks (2100 hours of accelerometer observations, 17 GB).
 
 !["runtime plots"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/images/runtime_plots.png)
 
-Computation took place on the Odyssey Cluster's `seas_iacs` partition.  Preliminary versions of the code were run on individual nodes equipped with 32 cores; hybrid code was run on four such nodes.  Estimates for the actual data set were calculated by averaging runtimes for five repetitions of the data processing task.  For the simulated data, the task was completed only once by each version of the code.  The above plots show estimated processing speeds, in seconds per hour of accelerometer data, as well as speedups relative to the baseline of unaccelerated Python code.
+Computation took place on the Odyssey Cluster's `seas_iacs` partition.  Preliminary versions of the code were run on individual nodes equipped with 32 cores; hybrid code was run on four such nodes.  Estimates for the actual data set were calculated by averaging runtimes for five repetitions of the data processing task.  For the simulated data, the task was completed only once by each version of the code.  The above plots show estimated times-to-solution, in seconds per hour of accelerometer data, as well as speedups relative to the baseline of unaccelerated Python code.
 
-On a single node with 32 processors, the use of C extensions improves runtime by a factor of about 2, and OpenMP functionality yields a speedup factor of over 3.5.  On four contiguous nodes, the hybrid code is over 4.5 times as fast as unaccelerated Python code for the actual data task, and almost 14 times as fast for the larger hypothetical data task.  The difference may be due, in part, to startup costs associated with unzipping compressed files.  Only the hybrid code implements concurrent decompression, a considerable advantage for data sets that contain numerous zipped directories.  Prior to optimization, each hour of accelerometer data took multiple seconds to process; the hybrid code brings this processing time to under 0.6 seconds.
+On a single node with 32 processors, the use of C extensions reduces runtime by a factor of about 2, and OpenMP functionality yields a speedup factor of over 3.5.  On four contiguous nodes, the hybrid code is over 4.5 times as fast as unaccelerated Python code for the actual data task, and almost 14 times as fast for the larger hypothetical data task.  The difference may be due, in part, to startup costs associated with unzipping compressed files.  Only the hybrid code implements concurrent decompression, a considerable advantage for data sets that contain numerous zipped directories.  Prior to optimization, each hour of accelerometer data took multiple seconds to process; the hybrid code brings this processing time to under 0.6 seconds.
 
 
 ## Analysis of Physical Activity
@@ -84,26 +86,31 @@ The densities of these two distributions appear linear on a log-log plot, as sho
 
 !["histograms"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/images/histograms_fit.png)
 
-Of special concern is the systematic missingness associated with battery-conservation strategies.  Accelerometer data collection over the course of a day may deplete a smartphone's battery by more than 50%.  Therefore, data collection is continuously interrupted.  For example, each minute of accelerometer data may be sandwiched between minutes when the sensor is turned off.
+Of special concern is the systematic missingness associated with battery-conservation strategies.  Accelerometer data collection over the course of a day may deplete a smartphone's battery by more than 50%.  Therefore, by design, data collection is continuously interrupted.  For example, each minute of accelerometer data may be sandwiched between minutes when the sensor is turned off.  The exact on-off pattern of the sensor may be determined by the researcher during the study planning phase.
 
 !["missing data"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/images/missing_data.png)
 
 While this missingness is "uninformative" at the level of the binary time series, longer bursts will be disproportionately interrupted, leading to biased estimates of distribution parameters.  (In the case of the power law exponent, estimates will be biased upwards.)  A possible solution may be a multiple imputation strategy based on stochastic models of the binary time series.  While imputation for accelerometer data has been studied in the past [9], estimation of parameters for bursty periods and inter-event times has yet to be examined in this context.
 
 
+## Advanced Features:  Parallelized Simulations with a Memoryless Imputation Model
 
-## Advanced Features:  Model and Parallelization
+Complete, uninterrupted days of accelerometer data were used as the basis for a simulation study designed to examine the viability of multiple imputation for missing data, and to assess the impact of missingness on parameter estimation.  A memoryless process was adopted as a stochastic data-generating model for the binary time series.  This model can be though of as a Markov chain of order *m*, or equivalently, a saturated logistic regression model with *m* predictors, where *m* is half the length of an accelerometer on-period.
 
-# Markov Model
+To implement this simulation, four days of complete accelerometer data were systematically downsampled with on/off cycles ranging from 30 seconds to two minutes.  For each set of downsampled data, the memoryless model was first fitted to the available data, and then used to generate 1000 imputated data sets.  The power law exponent was estimated from each imputed data set, and the average of these estimates was compared to the "true" estimate from the original complete data.
 
-# Parallelization
+While the data processing pipeline needed to accommodate hundreds of hours of data, this simulation required only that four days of data be processed in a reasonable time frame.  Therefore, the optimization approach taken here was to 
 
-
+As before, C extensions with Open MP parallelization were implemented in combination with explicit parallel processing with MPI.  The resulting hybrid SPMD implementation of the simulation ran in about four hours on four 32-core nodes.
 
 !["imputation results"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/images/imputation_results.png)
 
+The above plots show the bias of the naive estimates (red) and imputation-based estimates (green) for the exponents of the activity distributions.  While the imputation strategy appears to be a substantial improvement over the naive approach, especially in the case of the active burst distribution, the imputation-based estimate is nevertheless consistently biased downward by several percent.
 
 
+## Conclusion
+
+Smartphone accelerometry offers the possibility of important insights into human physical activity.  However, large data sets and a variety of missing data features create special challenges.  In this project, parallel programming was used to address both of these issues.  A hybrid SPMD programming model facilitated efficient data processing, reducing runtimes by a factor of 14.  And the same programming approach also allowed rapid evaluation of a multiple imputation strategy for parameter estimation.
 
 
 ## References
