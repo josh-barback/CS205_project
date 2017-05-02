@@ -3,7 +3,7 @@
 
 ## Background
 
-At the Chan School's Onnela Lab, the *digital phenotyping* project is a framework for leveraging data from digital devices to obtain *moment-by-moment quantification of the individual-level human phenotype*[1].
+At the Chan School's Onnela Lab, the *digital phenotyping* project is a framework for leveraging data from digital devices to obtain *moment-by-moment quantification of the individual-level human phenotype* [1].
 
 Accelerometers have been used in the study of human activity for several decades, and these sensors have become increasingly ubiquitous in modern electronic devices.  Today, virtually every smartphone and tablet is equipped with a piezo-electric triaxial accelerometer.  Smartphone accelerometry is currently an active area of research, with applications ranging from real-time activity classification to the detection of neuromuscular disorders [2, 3, 4].
 
@@ -48,7 +48,7 @@ First, raw hourly data is collected into periods of interest identified by the r
 
 !["summary plots"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/images/summary_plots.png)
 
-The above plots illustrate several steps in this pipeline, beginning with the signal magnitude time series at top.  The center plot shows mean absolute deviations from resting acceleration, with the individual cutoff represented by a dashed red line (just above the x-axis).  At bottom, green vertical lines represent epochs that have been classified as *active*.
+The above plots illustrate several steps in this pipeline, beginning with the signal magnitude time series at top.  The center plot shows mean absolute deviations from resting acceleration, with the individual cutoff represented by a red line (just above the x-axis).  At bottom, green vertical lines represent epochs that have been classified as *active*.
 
 
 ## Hybrid SPMD Parallelization for Accelerometer Data Processing
@@ -82,11 +82,11 @@ Physical activity, like many other human behaviors, is *bursty* and *correlated*
 
 The observed active burst lengths (green) and the observed sedentary period lengths (blue) are taken as samples from the corresponding distributions.
 
-The densities of these two distributions appear linear on a log-log plot, as shown below.  The power law is one possible candidate for a parametric model for these distributions.  Fitting a power law corresponds to estimation of the exponent in the density *P*(*x*) ~ *x*<sup>*a*</sup>.  There are a number of subtleties associated with fitting heavy-tailed distributions to data [7]; many of the relevant methods have been implemented in the Python package `powerlaw` [8].
+The densities of these two distributions appear linear on a log-log plot, as shown below.  The power law is one possible candidate for a parametric model for these distributions.  Fitting a power law corresponds to estimation of the exponent in the density *P*(*x*) ~ *x*<sup>-*a*</sup>.  There are a number of subtleties associated with fitting heavy-tailed distributions to data [7]; many of the relevant methods have been implemented in the Python package `powerlaw` [8].
 
 !["histograms"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/images/histograms_fit.png)
 
-Of special concern is the systematic missingness associated with battery-conservation strategies.  Accelerometer data collection over the course of a day may deplete a smartphone's battery by more than 50%.  Therefore, by design, data collection is continuously interrupted.  For example, each minute of accelerometer data may be sandwiched between minutes when the sensor is turned off.  The exact on-off pattern of the sensor may be determined by the researcher during the study planning phase.
+Of special concern is the systematic missingness associated with battery-conservation strategies.  Accelerometer data collection over the course of a day may deplete a smartphone's battery by more than 50%.  Therefore, by design, data collection is continuously interrupted.  For example, each minute of accelerometer data may be sandwiched between minutes when the sensor is turned off.  The exact on-off pattern of the sensor is determined by the researcher during the study planning phase.
 
 !["missing data"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/images/missing_data.png)
 
@@ -97,11 +97,9 @@ While this missingness is "uninformative" at the level of the binary time series
 
 Complete, uninterrupted days of accelerometer data were used as the basis for a simulation study designed to examine the viability of multiple imputation for missing data, and to assess the impact of missingness on parameter estimation.  A memoryless process was adopted as a stochastic data-generating model for the binary time series.  This model can be though of as a Markov chain of order *m*, or equivalently, a saturated logistic regression model with *m* predictors, where *m* is half the length of an accelerometer on-period.
 
-To implement this simulation, four days of complete accelerometer data were systematically downsampled with on/off cycles ranging from 30 seconds to two minutes.  For each set of downsampled data, the memoryless model was first fitted to the available data, and then used to generate 1000 imputated data sets.  The power law exponent was estimated from each imputed data set, and the average of these estimates was compared to the "true" estimate from the original complete data.
+To implement this simulation, four days of complete accelerometer data were systematically downsampled with on/off cycles ranging from 30 seconds to two minutes.  For each set of downsampled data, the memoryless model was first fitted to the available data, and then used to generate 1000 imputed data sets.  The power law exponent was estimated from each imputed data set, and the average of these estimates was compared to the "true" estimate from the original complete data.
 
-While the data processing pipeline needed to accommodate hundreds of hours of data, this simulation required only that four days of data be processed in a reasonable time frame.  Therefore, the optimization approach taken here was to 
-
-As before, C extensions with Open MP parallelization were implemented in combination with explicit parallel processing with MPI.  The resulting hybrid SPMD implementation of the simulation ran in about four hours on four 32-core nodes.
+While the data processing pipeline needed to accommodate hundreds of hours of data, this simulation required only that four days of data be processed in a reasonable time frame.  As before, C extensions with Open MP parallelization were implemented in combination with explicit parallel processing with MPI.  The resulting hybrid SPMD implementation of the simulation ran in about four hours on four 32-core nodes.
 
 !["imputation results"](https://raw.githubusercontent.com/josh-barback/CS205_project/master/images/imputation_results.png)
 
